@@ -1,0 +1,10 @@
+.git
+.DS_Store
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+data/curated/*.tmp
+data/memory/*.tmp

@@ -1,0 +1,44 @@
+services:
+  music-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: music-agent
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      MUSIC_AGENT_MODEL: ${MUSIC_AGENT_MODEL:-gemma3:4b}
+      MUSIC_AGENT_FALLBACK_MODEL: ${MUSIC_AGENT_FALLBACK_MODEL:-phi4-mini}
+      MUSIC_AGENT_HOST: 0.0.0.0
+      MUSIC_AGENT_PORT: 8080
+      MUSIC_AGENT_ROOT_DIR: /app
+      MUSIC_AGENT_DATA_DIR: /app/data
+      MUSIC_AGENT_KNOWLEDGE_DIR: /app/knowledge
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    environment:
+      ENABLE_OLLAMA_API: "False"
+      ENABLE_OPENAI_API: "True"
+      OPENAI_API_BASE_URL: http://music-agent:8080/v1
+      OPENAI_API_KEY: local-music-agent
+      WEBUI_AUTH: "False"
+    ports:
+      - "3000:8080"
+    volumes:
+      - open-webui-data:/app/backend/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - music-agent
+    restart: unless-stopped
+
+volumes:
+  open-webui-data:

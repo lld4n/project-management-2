@@ -1,0 +1,6 @@
+[console_scripts]
+music-agent-answer = music_agent.cli:answer_main
+music-agent-build-db = music_agent.cli:build_db_main
+music-agent-build-memory = music_agent.cli:build_memory_main
+music-agent-demo-tools = music_agent.cli:demo_tools_main
+music-agent-serve = music_agent.cli:serve_main
