@@ -4,3 +4,6 @@ __pycache__/
 data/memory
 data/raw
 data/curated
+evals/agent_eval_cases.json
+evals/agent_eval_results.json
+evals/MODEL_EVAL_RESULTS.json
