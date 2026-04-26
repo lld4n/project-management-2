@@ -27,9 +27,11 @@
 
 ---
 
-## 2. Выбранный стек
+## 2. Целевой стек
 
-### Основной выбор
+Этот раздел описывает целевой production-ready стек. В текущем MVP фактически реализован облегчённый вариант, описанный в `OBSERVABILITY_LITE.md`.
+
+### Основной целевой выбор
 
 - `OpenTelemetry`
 - `Langfuse`
@@ -287,7 +289,7 @@
 
 ## 10. Итог
 
-Рекомендуемый observability stack:
+Целевой observability stack:
 
 - instrumentation: `OpenTelemetry`
 - LLM traces: `Langfuse`
@@ -301,3 +303,16 @@
 - трассируемость;
 - дебаггируемость;
 - defendable engineering design.
+
+Фактический MVP сейчас:
+
+- structured run log в `data/memory/run_log.jsonl`;
+- `run_id`;
+- latency;
+- planner summary;
+- tool count;
+- memory hit count;
+- approved/rejected claims;
+- final answer.
+
+Alertmanager, Grafana dashboards, Loki и Langfuse не подняты как отдельные сервисы в текущем `docker-compose.yml`; они остаются целевым upgrade path.

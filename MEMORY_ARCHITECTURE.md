@@ -88,9 +88,10 @@
 - reusable interpretations, которые уже были проверены;
 - словари, таксономии, policy notes.
 
-### Рекомендуемый storage
+### Фактический storage в MVP
 
-- `LanceDB` или аналогичный локальный vector store
+- `data/memory/semantic_index.jsonl`
+- lightweight lexical / TF-IDF-like search в `src/music_agent/semantic_memory.py`
 
 ### Почему
 
@@ -107,6 +108,16 @@
 
 - риск смешения факта и summary;
 - нужен жёсткий policy: semantic memory не заменяет factual evidence.
+- текущая реализация проще, чем полноценный vector store;
+- нет embeddings и semantic similarity на уровне LanceDB/Chroma.
+
+### Что рассматривалось как upgrade
+
+- `LanceDB`
+- `Chroma`
+- hybrid search
+- hierarchical RAG
+- GraphRAG / knowledge graph
 
 ---
 
@@ -153,9 +164,9 @@
 - verification status;
 - final response payload.
 
-### Где живёт
+### Где живёт в MVP
 
-- в graph runtime state
+- в `AgentState` внутри `src/music_agent/agents.py`
 
 ### Почему
 
@@ -205,9 +216,16 @@
 
 ## 10. Итог
 
-Рекомендуемая память для проекта:
+Фактически реализованная память в MVP:
 
 - factual layer: `DuckDB`
-- semantic layer: `LanceDB`
-- episodic layer: `JSONL / event log`
-- short-term state: `LangGraph state`
+- semantic layer: `data/memory/semantic_index.jsonl`
+- episodic layer: `data/memory/run_log.jsonl`
+- short-term state: `AgentState`
+
+Целевые улучшения:
+
+- заменить lightweight semantic search на LanceDB/Chroma;
+- добавить embeddings;
+- добавить retrieval evals;
+- добавить evidence links между semantic notes и factual rows.

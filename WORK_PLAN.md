@@ -1,499 +1,137 @@
-# WORK PLAN
+# Work Plan / Current Status
 
-## Как работаем с этим файлом
-
-- Используем этот файл как единый трекер проекта.
-- У каждой задачи есть:
-  - статус;
-  - что нужно сделать;
-  - ожидаемый результат;
-  - фактический результат после выполнения.
-- Статусы:
-  - `[ ]` не начато
-  - `[-]` в работе
-  - `[x]` сделано
-  - `[!]` блокер / требует решения
-
----
+Этот файл отражает фактическое состояние проекта, а не исходный черновой план.
 
 ## 1. Цель проекта
 
-Собрать локальную мультиагентную систему на базе open-source LLM для анализа музыкальной истории пользователя из `data/raw`, сравнить движки и модели под `MacBook Air M1 16GB`, выбрать оптимальный стек, обосновать архитектуру, память, изоляцию, evals и observability.
+Собрать локальную мультиагентную систему на базе open-source LLM для анализа музыкальной истории пользователя из `data/raw`.
+
+## 2. Что реализовано
+
+### LLM runtime
+
+- Рассмотрены: `Ollama`, `llama.cpp`, `MLX-LM`, `LM Studio`, `vLLM`.
+- Выбран: `Ollama`.
+- Причина: самый простой локальный запуск на `MacBook Air M1 16GB`, удобный HTTP API, быстрый model switching.
+
+### Model selection
+
+- Протестированы: `gemma3:4b`, `phi4-mini`, `llama3.2:3b`, `qwen3:4b`.
+- Основная модель: `gemma3:4b`.
+- Backup: `phi4-mini`.
+- Критерии: hallucination resistance, abstention quality, factual QA, JSON/schema stability, tool-use readiness, speed, memory fit.
+
+### Agent spec
+
+- ТЗ агента оформлено в `AGENT_SPEC.md`.
+- Основной домен: анализ музыкальной истории.
+- Главный принцип: grounded answers only.
 
-### Продуктовая идея
+### Multi-agent architecture
 
-Система анализирует историю музыкального потребления и отвечает на grounded-вопросы по данным:
+- Реализованный flow:
+
+```text
+Planner -> Memory -> Data -> Analysis -> Verifier -> Report
+```
+
+- Реализация: `src/music_agent/agents.py`, `src/music_agent/agent_runtime.py`.
+- Есть fast factual path для простых factual-запросов.
+- Диаграммы: `ARCHITECTURE_DIAGRAMS.md`.
+
+### Framework decision
+
+- Рассмотрены: `LangGraph`, `LangChain`, `CrewAI`, `AutoGen`.
+- В MVP выбран custom shared-state orchestration.
+- Причина: workflow небольшой, маршруты в основном детерминированы, критичная логика находится в SQL tools, memory и verifier.
+- `LangGraph` оставлен как upgrade path.
+
+### Data and tools
+
+- Реализован ingestion `data/raw -> DuckDB`.
+- База: `data/curated/music_history.duckdb`.
+- Tools реализованы в `src/music_agent/tools.py`:
+  - `dataset_overview`
+  - `top_entities`
+  - `daily_snapshot`
+  - `entity_peak_dates`
+  - `weekly_rollup`
+  - `weekly_trend_summary`
+  - `period_compare`
+  - `period_compare_summary`
+  - `stability_vs_spikes`
+
+### Prompts, skills, knowledge
+
+- System prompts: `SYSTEM_PROMPTS.md`.
+- Skills:
+  - `skills/sql_analytics.md`
+  - `skills/timeline_insights.md`
+  - `skills/grounded_reporting.md`
+  - `skills/self_check.md`
+- Knowledge files:
+  - `knowledge/domain_guide.md`
+  - `knowledge/reporting_policy.md`
+  - `knowledge/failure_modes.md`
+  - `knowledge/metrics_glossary.md`
+
+### Memory
+
+- Factual memory: `DuckDB`.
+- Semantic memory: `data/memory/semantic_index.jsonl`.
+- Episodic memory: `data/memory/run_log.jsonl`.
+- Short-term memory: `AgentState`.
+- Подробности: `MEMORY_ARCHITECTURE.md`.
+
+### Isolation
+
+- Рассмотрены: host runtime, Docker, mixed host/container, VM, microVM-like isolation.
+- Выбрано: `Ollama` на host macOS, `music-agent` и `Open WebUI` в Docker Compose.
+- Полноценный отдельный tool sandbox не поднят в MVP; это upgrade path.
+- Подробности: `ISOLATION_DESIGN.md`.
+
+### Evals
+
+- Model eval docs:
+  - `evals/MODEL_EVAL_CASES.md`
+  - `evals/MODEL_EVAL_RESULTS.md`
+- Agent evals:
+  - `evals/agent_eval_cases.json`
+  - `evals/agent_eval_results.json`
+  - `src/music_agent/eval_runner.py`
+- Текущий runner: `music-agent-run-evals`.
+- Известное ограничение: текущий pass rate не 100%, часть broad analytical сценариев требует hardening.
+
+### Observability
+
+- MVP: structured run log в `data/memory/run_log.jsonl`.
+- Логируются: `run_id`, latency, query, planner summary, tasks, memory hits, tool count, approved/rejected claims, answer.
+- Target stack описан в `OBSERVABILITY_DESIGN.md`: OpenTelemetry, Langfuse, Prometheus, Grafana, Loki, Alertmanager.
+- Target stack не поднят как отдельные сервисы в MVP.
+
+## 3. Что осталось как upgrade path
+
+- Перенести custom orchestration на `LangGraph`.
+- Добавить vector/hybrid semantic retrieval через LanceDB/Chroma.
+- Доработать verifier loop `Verifier -> Data`.
+- Поднять полноценный observability stack.
+- Добавить Prometheus/Grafana dashboards и alerting.
+- Усилить Docker isolation: `read_only`, `cap_drop`, `no-new-privileges`, resource limits.
+- Довести eval pass rate и добавить refusal/security cases.
+
+## 4. Главная позиция для защиты
+
+Проект реализован как рабочий MVP агента, а не как набор отдельных single-agent скриптов.
+
+Фактический центр системы:
+
+- локальная LLM;
+- SQL tools;
+- hybrid memory;
+- verifier;
+- deterministic fast path;
+- Dockerized app/API;
+- Open WebUI interface;
+- eval artifacts;
+- structured run log.
 
-- как менялся вкус по времени;
-- какие жанры, артисты и паттерны закрепились;
-- что было краткосрочным всплеском;
-- какие рекомендации выглядели устойчивыми, а какие случайными;
-- какие тренды и инсайты можно извлечь из нескольких месяцев истории.
-
-### Целевой результат
-
-К финалу проекта должны быть:
-
-- выбранный и обоснованный inference-движок;
-- протестированный shortlist лёгких локальных моделей;
-- выбранная модель для агента;
-- реализованная мультиагентная система;
-- набор system prompts и skills;
-- семантически полезные `.md`-файлы;
-- реализованная память;
-- настроенные evals;
-- настроенный observability-стек;
-- итоговый отчёт с аргументацией решений.
-
----
-
-## 2. Ключевые решения, которые нужно принять
-
-### 2.1 Inference engine
-
-- [ ] Сравнить `Ollama`, `llama.cpp`, `MLX-LM`, `LM Studio`
-  - Что сделать: собрать таблицу по установке, производительности, удобству API, контролю над квантами, удобству локального прод-использования.
-  - Ожидаемый результат: shortlist движков и финальный выбор основного runtime.
-  - Фактический результат: _не заполнено_
-
-### 2.2 Модель для агента
-
-- [ ] Выбрать набор моделей для сравнения
-  - Что сделать: подготовить shortlist лёгких моделей, которые реалистично запускать на `M1 16GB`.
-  - Ожидаемый результат: 3-4 кандидата для честного сравнения.
-  - Фактический результат: _не заполнено_
-
-- [ ] Провести сравнение моделей
-  - Что сделать: измерить качество, склонность к галлюцинациям, следование инструкциям, качество structured output, tool use, latency, memory usage.
-  - Ожидаемый результат: таблица сравнения и обоснованный выбор основной модели и backup-модели.
-  - Фактический результат: _не заполнено_
-
-### 2.3 Изоляция
-
-- [ ] Сравнить варианты изоляции
-  - Что сделать: рассмотреть `host runtime`, `Docker`, `sandboxed container`, `VM`, смешанные схемы.
-  - Ожидаемый результат: выбранная архитектура изоляции с аргументацией плюсов и минусов.
-  - Фактический результат: _не заполнено_
-
-### 2.4 Архитектура мультиагентной системы
-
-- [ ] Выбрать orchestration framework
-  - Что сделать: сравнить как минимум 2 подхода, один из которых graph/state-based.
-  - Ожидаемый результат: выбранный framework и описание причин выбора.
-  - Фактический результат: _не заполнено_
-
-- [ ] Зафиксировать роли агентов
-  - Что сделать: описать роли, входы, выходы, ответственность, fail conditions.
-  - Ожидаемый результат: согласованная схема мультиагентной системы.
-  - Фактический результат: _не заполнено_
-
-### 2.5 Память
-
-- [ ] Выбрать стратегию памяти
-  - Что сделать: сравнить SQL-first, naive RAG, hybrid memory, улучшенный RAG / hierarchical RAG / graph-like variants.
-  - Ожидаемый результат: обоснованный выбор memory architecture.
-  - Фактический результат: _не заполнено_
-
-### 2.6 Evals и observability
-
-- [ ] Выбрать eval framework и метрики
-  - Что сделать: определить, как мерить и модель, и всю agentic system.
-  - Ожидаемый результат: набор метрик, сценариев и порогов качества.
-  - Фактический результат: подготовлены [EVALS.md](/Users/luffy/Desktop/project-management-2/EVALS.md), [evals/agent_eval_cases.json](/Users/luffy/Desktop/project-management-2/evals/agent_eval_cases.json) и минимальный runner [src/music_agent/eval_runner.py](/Users/luffy/Desktop/project-management-2/src/music_agent/eval_runner.py). Базовые factual и analytical scenarios уже прогонялись вручную; auto-eval runner реализован и требует ещё небольшого полиша вокруг стабильного сохранения полного итогового артефакта.
-
-- [ ] Выбрать observability stack
-  - Что сделать: сравнить варианты по логам, метрикам, трейсингу и алертингу.
-  - Ожидаемый результат: утверждённый стек наблюдаемости.
-  - Фактический результат: для MVP оформлен lightweight подход в [OBSERVABILITY_LITE.md](/Users/luffy/Desktop/project-management-2/OBSERVABILITY_LITE.md). В runtime уже логируются `run_id`, `latency_ms`, `planner_summary`, `tasks`, `memory_hit_count`, `tool_count`, approved/rejected claims и финальный answer в `data/memory/run_log.jsonl`.
-
----
-
-## 3. Пошаговый план работ
-
-## Этап 0. Формализация проекта
-
-- [x] Зафиксировать общий план работ
-  - Что сделать: создать рабочий markdown-файл с roadmap, статусами и результатами.
-  - Ожидаемый результат: единый документ для ведения проекта.
-  - Фактический результат: создан `WORK_PLAN.md`.
-
-- [ ] Сформировать формальное ТЗ
-  - Что сделать: описать цель, функциональные требования, нефункциональные требования, ограничения железа, критерии успеха.
-  - Ожидаемый результат: отдельный раздел или файл с формальным ТЗ.
-  - Фактический результат: _не заполнено_
-
-## Этап 1. Разбор данных
-
-- [ ] Провести data profiling
-  - Что сделать: изучить структуру файлов в `data/raw`, зафиксировать схему, объём, диапазон дат, качество данных, потенциальные пропуски.
-  - Ожидаемый результат: документированная схема raw-данных.
-  - Фактический результат: базовый profiling выполнен. Зафиксированы объём, диапазон дат, типы контекста и наличие неполных трековых записей (`no-rights`). Подготовлен `evals/GROUNDED_EVAL_SET.md` с проверенными фактами для следующего этапа.
-
-- [ ] Определить полезные сущности
-  - Что сделать: выделить `snapshot`, `day`, `context`, `track`, `artist`, `album`, `genre`, `recommendation source`, временные признаки.
-  - Ожидаемый результат: логическая модель данных.
-  - Фактический результат: _не заполнено_
-
-- [ ] Спроектировать curated layer
-  - Что сделать: решить, как переводить raw JSON в табличный вид.
-  - Ожидаемый результат: схема нормализованных таблиц.
-  - Фактический результат: _не заполнено_
-
-## Этап 2. Движки локального запуска LLM
-
-- [ ] Подготовить критерии сравнения движков
-  - Что сделать: определить параметры сравнения.
-  - Ожидаемый результат: шаблон таблицы engine benchmark.
-  - Фактический результат: _не заполнено_
-
-- [ ] Сравнить `Ollama`
-  - Что сделать: изучить установку, API, ограничения, удобство локального сервинга.
-  - Ожидаемый результат: краткая карточка движка.
-  - Фактический результат: _не заполнено_
-
-- [ ] Сравнить `llama.cpp`
-  - Что сделать: изучить запуск, Metal acceleration, контроль над квантами и бенчмаркингом.
-  - Ожидаемый результат: краткая карточка движка.
-  - Фактический результат: _не заполнено_
-
-- [ ] Сравнить `MLX-LM`
-  - Что сделать: оценить релевантность как Apple Silicon-специфичного варианта.
-  - Ожидаемый результат: краткая карточка движка.
-  - Фактический результат: _не заполнено_
-
-- [ ] Сравнить `LM Studio`
-  - Что сделать: оценить как GUI/debugging инструмент и как runtime.
-  - Ожидаемый результат: краткая карточка движка.
-  - Фактический результат: _не заполнено_
-
-- [ ] Выбрать основной runtime
-  - Что сделать: принять решение на основе сравнения.
-  - Ожидаемый результат: финальный выбор движка с обоснованием.
-  - Фактический результат: _не заполнено_
-
-## Этап 3. Подбор и тестирование моделей
-
-- [-] Сформировать shortlist моделей
-  - Что сделать: выбрать 3-4 лёгкие модели, которые реально запускаются на `M1 16GB`.
-  - Ожидаемый результат: зафиксированный shortlist.
-  - Фактический результат: создан отдельный документ `POINT2_MODEL_EVAL_PLAN.md`, в котором зафиксирован shortlist: `qwen3:4b`, `gemma3:4b`, `phi4-mini`, `llama3.2:3b`. Все 4 модели установлены локально через `Ollama`.
-
-- [-] Подготовить eval harness
-  - Что сделать: описать единый способ запуска тестов для всех моделей.
-  - Ожидаемый результат: сценарии тестирования и шаблоны запросов.
-  - Фактический результат: в `POINT2_MODEL_EVAL_PLAN.md` зафиксированы критерии оценки, группы тестов и шаблон таблицы результатов. Созданы `evals/MODEL_EVAL_CASES.md` и `evals/MODEL_EVAL_RESULTS.md`. Выполнен первичный ручной screening-моделей без передачи пользовательских данных; полноценный grounded eval на реальном датасете ещё не выполнен.
-
-- [-] Провести factual evals
-  - Что сделать: проверить grounded QA на ваших данных.
-  - Ожидаемый результат: оценка точности ответов по данным.
-  - Фактический результат: собран `evals/GROUNDED_EVAL_SET.md` и выполнен первый grounded mini-batch для `gemma3:4b` и `phi4-mini`. Обе модели корректно отвечают на базовые answerable кейсы с переданным контекстом.
-
-- [-] Провести hallucination evals
-  - Что сделать: дать модели вопросы с недостатком данных и проверить склонность выдумывать.
-  - Ожидаемый результат: hallucination rate / abstention quality.
-  - Фактический результат: выполнен предварительный ручной прогон на абстрактных провокационных вопросах без передачи датасета и первый grounded unanswerable mini-batch с передачей контекста. Промежуточный результат: `gemma3:4b` показывает самый чистый отказ, `phi4-mini` тоже не галлюцинирует, но отвечает более шумно; `llama3.2:3b` склонна к выдумыванию, `qwen3:4b` нестабильна в текущем runtime.
-
-- [ ] Провести tool-use и structured-output evals
-  - Что сделать: протестировать соблюдение схемы JSON, вызов инструментов и качество следования инструкциям.
-  - Ожидаемый результат: понимание агентной пригодности модели.
-  - Фактический результат: выполнен первый mini-batch для `gemma3:4b` и `phi4-mini`. Обе модели нарушают строгий JSON format, заворачивая ответ в markdown fences. В tool-routing `gemma3:4b` понимает, что нужен расчёт, но формулирует ответ неидеально; `phi4-mini` ошибается сильнее и может неверно решить, что расчёт не нужен.
-
-- [ ] Провести performance evals
-  - Что сделать: замерить latency, throughput, memory footprint.
-  - Ожидаемый результат: practical feasibility на вашем железе.
-  - Фактический результат: _не заполнено_
-
-- [-] Выбрать модель для агента
-  - Что сделать: принять решение на базе evals.
-  - Ожидаемый результат: выбранная модель + backup.
-  - Фактический результат: решение зафиксировано. Основная модель — `gemma3:4b`, backup — `phi4-mini`. Решение оформлено в `MODEL_DECISION.md`.
-
-## Этап 4. ТЗ под самого агента
-
-- [ ] Описать сценарии использования
-  - Что сделать: перечислить, какие задачи должен решать агент.
-  - Ожидаемый результат: use-case list.
-  - Фактический результат: _не заполнено_
-
-- [ ] Описать ограничения поведения
-  - Что сделать: зафиксировать groundedness policy, запрет на неподтверждённые выводы, политику отказа при нехватке данных.
-  - Ожидаемый результат: policy section.
-  - Фактический результат: _не заполнено_
-
-- [ ] Описать входы и выходы системы
-  - Что сделать: определить типы запросов, формат ответов, структуру отчётов.
-  - Ожидаемый результат: интерфейс агента.
-  - Фактический результат: _не заполнено_
-
-## Этап 5. Архитектура мультиагентной системы
-
-- [ ] Спроектировать high-level graph
-  - Что сделать: определить пайплайн `orchestrator -> analyst -> insight -> verifier -> reporter`.
-  - Ожидаемый результат: схема исполнения.
-  - Фактический результат: создан `MULTI_AGENT_ARCHITECTURE.md`, в котором зафиксирован базовый graph: `Planner -> Memory -> Data -> Analysis -> Verifier -> Report`. В коде execution model переведена на явную shared-state orchestration.
-
-- [ ] Описать каждый агент
-  - Что сделать: зафиксировать цель, допустимые инструменты, формат вывода, ограничения.
-  - Ожидаемый результат: agent cards.
-  - Фактический результат: в коде и архитектурных документах выделены `Planner Agent`, `Memory Agent`, `Data Agent`, `Analysis Agent`, `Verifier Agent`, `Report Agent`.
-
-- [ ] Определить handoff rules
-  - Что сделать: прописать, когда агент передаёт управление дальше и когда ответ должен быть отклонён.
-  - Ожидаемый результат: правила маршрутизации.
-  - Фактический результат: handoff реализован в shared state pipeline: planner формирует tasks, memory enriches context, data исполняет tools, analysis строит claims, verifier режет рискованные утверждения, report собирает финальный ответ.
-
-## Этап 5.1 Реализация runtime
-
-- [-] Реализовать ingestion и analytical layer
-  - Что сделать: собрать локальную базу из `data/raw`, нормализовать сущности и убрать дубли из rolling snapshots.
-  - Ожидаемый результат: рабочий `DuckDB` со стабильным analytical layer.
-  - Фактический результат: реализованы `src/music_agent/ingest.py`, `src/music_agent/schema.py`, построена база `data/curated/music_history.duckdb`; добавлены canonical views для дедупликации дней, items, track occurrences и artist edges.
-
-- [x] Реализовать базовые tools
-  - Что сделать: закрыть dataset overview, top entities, daily snapshot, weekly analytics, period compare.
-  - Ожидаемый результат: минимальный tool layer для factual и trend запросов.
-  - Фактический результат: реализованы tools `dataset_overview`, `top_entities`, `daily_snapshot`, `weekly_rollup`, `weekly_trend_summary`, `period_compare`, `period_compare_summary`, `stability_vs_spikes`, `entity_peak_dates`. Простые factual use-cases закрыты отдельным fast factual path без лишних LLM-вызовов.
-
-- [x] Реализовать runtime агентов
-  - Что сделать: собрать working pipeline `orchestrator -> analyst -> insight -> verifier -> report`.
-  - Ожидаемый результат: end-to-end локальный агент.
-  - Фактический результат: реализованы `src/music_agent/agents.py`, `src/music_agent/agent_runtime.py`, `src/music_agent/ollama_client.py`, `src/music_agent/cli.py`; runtime переведён с "схлопнутых ролей" на явную мультиагентную shared-state orchestration: `Planner -> Memory -> Data -> Analysis -> Verifier -> Report`. Для простых factual запросов добавлен ускоренный deterministic контур, а для широких аналитических вопросов сохранён полный multi-agent pipeline.
-
-- [-] Реализовать memory layer
-  - Что сделать: подключить run memory и semantic memory.
-  - Ожидаемый результат: память используется в runtime и может быть пересобрана локально.
-  - Фактический результат: каждый прогон пишется в `data/memory/run_log.jsonl`; реализован `src/music_agent/semantic_memory.py`, semantic index строится в `data/memory/semantic_index.jsonl` и используется Insight Agent-ом.
-
-- [-] Собрать launch layer
-  - Что сделать: подготовить контейнерный запуск app runtime и HTTP API поверх локального агента.
-  - Ожидаемый результат: проект можно поднять как сервис, а не только запускать через CLI.
-  - Фактический результат: добавлены `src/music_agent/server.py`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `Makefile`, `RUN_LOCAL.md`; app поднимается как HTTP API с `/health`, `/overview`, `/answer`, `/rebuild-memory`. Docker Desktop установлен и проверен локально, контейнер успешно собран и поднят через `docker compose`. Проверены `GET /health`, `GET /overview`, `POST /answer` для factual route и weekly analytics route. Дополнительно в `docker-compose.yml` добавлен `Open WebUI` как готовый web UI для локального `Ollama`.
-
-## Этап 6. Изоляция и безопасность
-
-- [ ] Сформировать threat model
-  - Что сделать: определить, что может пойти не так при tool use и локальном запуске.
-  - Ожидаемый результат: список рисков.
-  - Фактический результат: _не заполнено_
-
-- [ ] Выбрать схему изоляции
-  - Что сделать: определить, где живёт inference, где живёт agent app, как изолируются инструменты.
-  - Ожидаемый результат: утверждённая схема изоляции.
-  - Фактический результат: создан `ISOLATION_DESIGN.md`. Зафиксирован выбор: `host Ollama` + `Docker Compose` для app/observability + отдельный ограниченный execution layer для tools.
-
-- [ ] Зафиксировать аргументацию выбора
-  - Что сделать: описать плюсы, минусы, компромиссы и почему альтернативы хуже для этого кейса.
-  - Ожидаемый результат: раздел для защиты решения.
-  - Фактический результат: аргументация и сравнение альтернатив оформлены в `ISOLATION_DESIGN.md`.
-
-## Этап 7. Prompts, skills и knowledge files
-
-- [ ] Написать system prompt для orchestrator
-  - Что сделать: определить роль, политику маршрутизации, правила вызова tools.
-  - Ожидаемый результат: готовый системный промпт.
-  - Фактический результат: создан `SYSTEM_PROMPTS.md` с базовым промптом для `Orchestrator`.
-
-- [ ] Написать system prompt для analyst
-  - Что сделать: зафиксировать правила аналитического вывода только на базе данных.
-  - Ожидаемый результат: готовый системный промпт.
-  - Фактический результат: создан `SYSTEM_PROMPTS.md` с базовым промптом для `Data Analyst`.
-
-- [ ] Написать system prompt для verifier
-  - Что сделать: определить логику проверки доказуемости утверждений.
-  - Ожидаемый результат: готовый системный промпт.
-  - Фактический результат: создан `SYSTEM_PROMPTS.md` с базовым промптом для `Verifier`.
-
-- [ ] Написать system prompt для reporter
-  - Что сделать: определить стиль финального grounded-ответа.
-  - Ожидаемый результат: готовый системный промпт.
-  - Фактический результат: создан `SYSTEM_PROMPTS.md` с базовым промптом для `Report Agent`.
-
-- [ ] Создать skills
-  - Что сделать: подготовить специализированные способности агента.
-  - Ожидаемый результат: skills вроде `sql_analytics`, `timeline_insights`, `grounded_reporting`, `self_check`.
-  - Фактический результат: созданы repo-level skills в `skills/`: `sql_analytics`, `timeline_insights`, `grounded_reporting`, `self_check`.
-
-- [ ] Создать семантически полезные `.md`-файлы
-  - Что сделать: подготовить knowledge files с правилами, словарями, таксономиями, стандартами отчётности.
-  - Ожидаемый результат: пакет вспомогательных markdown-документов.
-  - Фактический результат: созданы knowledge files в `knowledge/`: `domain_guide.md`, `reporting_policy.md`, `failure_modes.md`, `metrics_glossary.md`.
-
-## Этап 8. Память
-
-- [ ] Выбрать и описать архитектуру памяти
-  - Что сделать: определить short-term, episodic, semantic и factual memory.
-  - Ожидаемый результат: memory design.
-  - Фактический результат: создан `MEMORY_ARCHITECTURE.md`, в котором выбран hybrid memory подход: `DuckDB` + `LanceDB` + episodic log + run state.
-
-- [ ] Реализовать factual memory
-  - Что сделать: поднять SQL-слой как источник истины.
-  - Ожидаемый результат: запросы к данным без галлюцинаций.
-  - Фактический результат: _не заполнено_
-
-- [ ] Реализовать semantic memory
-  - Что сделать: хранить summaries, extracted insights и reusable observations.
-  - Ожидаемый результат: вторичный слой смыслового retrieval.
-  - Фактический результат: пока реализован минимальный episodic memory слой через `data/memory/run_log.jsonl`. Полноценный semantic retrieval layer ещё не подключён.
-
-- [ ] Описать недостатки выбранного подхода
-  - Что сделать: честно зафиксировать trade-offs и варианты улучшения.
-  - Ожидаемый результат: аргументированный раздел в отчёте.
-  - Фактический результат: _не заполнено_
-
-## Этап 9. Реализация системы
-
-- [ ] Подготовить структуру проекта
-  - Что сделать: создать директории, конфиги, entrypoints.
-  - Ожидаемый результат: базовый каркас репозитория.
-  - Фактический результат: создан Python project skeleton (`pyproject.toml`, `src/music_agent`, `QUICKSTART.md`, `.gitignore`).
-
-- [ ] Реализовать ingestion pipeline
-  - Что сделать: парсить `data/raw` и собирать curated storage.
-  - Ожидаемый результат: воспроизводимый конвейер загрузки данных.
-  - Фактический результат: реализован ingestion pipeline в `src/music_agent/ingest.py`. Raw JSON загружается в `DuckDB`, а для аналитики добавлен canonical layer по уникальным датам.
-
-- [ ] Реализовать инструменты агента
-  - Что сделать: SQL queries, retrieval, reporting helpers, validation tools.
-  - Ожидаемый результат: набор tools для graph execution.
-  - Фактический результат: реализованы tools в `src/music_agent/tools.py`: `dataset_overview`, `top_entities`, `daily_snapshot`, `weekly_rollup`, `period_compare`.
-
-- [ ] Реализовать graph / orchestration
-  - Что сделать: собрать stateful multi-agent pipeline.
-  - Ожидаемый результат: рабочая агентная система.
-  - Фактический результат: реализован working multi-step runtime в `src/music_agent/agent_runtime.py` и `src/music_agent/agents.py`: `Orchestrator -> Data Analyst -> optional Insight Agent -> Verifier -> Report Agent`. Полный production-grade graph ещё не доведён, но роль handoff уже реализована.
-
-## Этап 10. Evals
-
-- [ ] Подготовить eval dataset
-  - Что сделать: собрать набор вопросов, expected answers и сценариев.
-  - Ожидаемый результат: локальный benchmark set.
-  - Фактический результат: созданы `evals/MODEL_EVAL_CASES.md` и `evals/GROUNDED_EVAL_SET.md`. Дополнительно создан `evals/GROUNDED_EVAL_RESULTS.md` с первым grounded mini-batch.
-
-- [ ] Оценить LLM как модель
-  - Что сделать: прогнать model-level evals.
-  - Ожидаемый результат: метрики по модели.
-  - Фактический результат: _не заполнено_
-
-- [ ] Оценить agentic system end-to-end
-  - Что сделать: прогнать целевые пользовательские сценарии.
-  - Ожидаемый результат: task success rate, groundedness, latency, verifier rejection rate.
-  - Фактический результат: _не заполнено_
-
-- [ ] Зафиксировать выводы по evals
-  - Что сделать: оформить, что система делает хорошо, где ломается и что улучшать.
-  - Ожидаемый результат: раздел итогового отчёта.
-  - Фактический результат: _не заполнено_
-
-## Этап 11. Observability
-
-- [ ] Подключить tracing
-  - Что сделать: трассировать agent runs, tool calls, retrieval и model invocations.
-  - Ожидаемый результат: видимость исполнения по шагам.
-  - Фактический результат: целевой tracing design зафиксирован в `OBSERVABILITY_DESIGN.md` через `OpenTelemetry + Langfuse`.
-
-- [ ] Подключить structured logs
-  - Что сделать: логировать решения маршрутизации, ошибки, отклонения verifier-а.
-  - Ожидаемый результат: понятные логи для дебага.
-  - Фактический результат: целевой logging design зафиксирован в `OBSERVABILITY_DESIGN.md` через structured logs + `Loki`.
-
-- [ ] Подключить metrics
-  - Что сделать: latency, token usage, number of tool calls, failures, acceptance/rejection rates.
-  - Ожидаемый результат: базовый metrics dashboard.
-  - Фактический результат: целевой metrics design зафиксирован в `OBSERVABILITY_DESIGN.md` через `Prometheus + Grafana`.
-
-- [ ] Настроить alerting
-  - Что сделать: определить минимально полезные алерты.
-  - Ожидаемый результат: уведомления о деградации или сбоях.
-  - Фактический результат: базовые alert rules и стек `Alertmanager` зафиксированы в `OBSERVABILITY_DESIGN.md`.
-
-## Этап 12. Отчёт и защита
-
-- [ ] Подготовить технический отчёт
-  - Что сделать: описать выборы по движку, модели, архитектуре, памяти, изоляции, evals, observability.
-  - Ожидаемый результат: целостный отчёт.
-  - Фактический результат: _не заполнено_
-
-- [ ] Подготовить тезисы для устной защиты
-  - Что сделать: собрать краткие аргументы по спорным местам.
-  - Ожидаемый результат: 5-10 минут уверенной защиты решений.
-  - Фактический результат: _не заполнено_
-
----
-
-## 4. Предварительная рекомендуемая целевая связка
-
-Это предварительная гипотеза, не финальное решение:
-
-- inference runtime: `Ollama`
-- low-level benchmark/control: `llama.cpp`
-- optional Apple Silicon comparison: `MLX-LM`
-- orchestration: `LangGraph`
-- data/factual layer: `DuckDB`
-- semantic memory: `LanceDB` или аналог
-- observability: `OpenTelemetry + Langfuse + Prometheus/Grafana/Loki`
-- isolation: `host LLM runtime + containerized app/services + restricted tool execution`
-
-Статус:
-
-- [-] Подтвердить или опровергнуть эту гипотезу по ходу проекта
-  - Что сделать: пройти сравнение и не фиксировать решение заранее.
-  - Ожидаемый результат: финальный стек на основе фактов.
-  - Фактический результат: `Ollama` подтвердился как удобный runtime для быстрого локального сравнения моделей. Однако `qwen3:4b` показала нестабильное поведение в текущем `Ollama` serving path из-за thinking/output-mode, поэтому runtime-специфика уже влияет на выбор модели и должна быть отражена в отчёте.
-
----
-
-## 5. Ближайшие следующие шаги
-
-- [ ] Формальное ТЗ
-- [ ] Data profiling и схема данных
-- [ ] Описать ТЗ под агента
-- [ ] Спроектировать архитектуру мультиагентной системы
-- [ ] Написать system prompts
-- [ ] Спроектировать memory layer
-- [ ] Выбрать изоляцию и observability stack
-
----
-
-## 6. Журнал прогресса
-
-### 2026-04-19
-
-- Создан файл `WORK_PLAN.md`
-- Зафиксирована продуктовая идея: мультиагентная система анализа музыкальной истории
-- Зафиксированы основные направления: engine selection, model evals, architecture, memory, isolation, evals, observability
-- Создан файл `POINT2_MODEL_EVAL_PLAN.md` с конкретным планом выполнения пункта 2
-- Зафиксирован shortlist локальных моделей под `M1 16GB`
-- Установлен `Ollama` и поднят локальный сервис на `localhost:11434`
-- Скачана baseline-модель `llama3.2:3b`
-- Подтверждён рабочий локальный inference через Ollama API
-- Скачана `phi4-mini`
-- Скачана `gemma3:4b`
-- Скачана `qwen3:4b`
-- Проведены первые ручные eval-прогоны для `llama3.2:3b` и `phi4-mini`
-- Проведены первые ручные eval-прогоны для `gemma3:4b`
-- Проведены первые ручные eval-прогоны для `qwen3:4b`
-- Зафиксировано, что `gemma3:4b` сейчас выглядит сильнейшим из протестированных кандидатов
-- Зафиксировано, что `qwen3:4b` в текущем стеке `Ollama` ведёт себя нестабильно из-за thinking/output-mode
-- Зафиксировано, что текущие прогоны были первичным screening без передачи реальных данных; полноценный grounded eval ещё впереди
-- Создан `evals/GROUNDED_EVAL_SET.md` на основе реальных фактов из `data/raw`
-- Создан `evals/GROUNDED_EVAL_RESULTS.md` с результатами первого grounded mini-batch
-- Выполнен первый grounded mini-batch для `gemma3:4b` и `phi4-mini`
-- Зафиксировано, что `gemma3:4b` остаётся лучшим кандидатом и после grounded-проверки
-- Выполнен первый structured-output / tool-routing mini-batch для `gemma3:4b` и `phi4-mini`
-- Создан `MODEL_DECISION.md` и зафиксирован выбор основной модели: `gemma3:4b`
-- Создан `MULTI_AGENT_ARCHITECTURE.md` с базовой архитектурой системы
-- Создан `SYSTEM_PROMPTS.md` с базовыми system prompts для всех ролей
-- Создан `TOOLS_AND_INTERFACES.md` с минимальным набором tools
-- Создан `MEMORY_ARCHITECTURE.md` с выбранной архитектурой памяти
-- Создан `ISOLATION_DESIGN.md` с выбранной схемой изоляции
-- Создан `OBSERVABILITY_DESIGN.md` с целевым стеком наблюдаемости
-- Реализован рабочий ingestion pipeline `data/raw -> DuckDB`
-- Реализованы analytical tools и working multi-step agent runtime
-- Добавлены `skills/` и `knowledge/` как repo-артефакты для agent behavior
-- Добавлен минимальный episodic run log в `data/memory/run_log.jsonl`
-- Создан `QUICKSTART.md` с командами запуска MVP
-- Созданы `evals/MODEL_EVAL_CASES.md` и `evals/MODEL_EVAL_RESULTS.md`
-
-Следующий целевой шаг:
-
-- Довести verifier policy, подключить полноценный semantic memory layer и начать cleanup / packaging runtime

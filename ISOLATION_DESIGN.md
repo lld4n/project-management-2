@@ -249,7 +249,8 @@
 
 ### Размещение
 
-- `Docker Compose`
+- целевой вариант: `Docker Compose`
+- фактический MVP: отдельный observability stack не поднят, используется `data/memory/run_log.jsonl`
 
 ### Почему
 
@@ -276,7 +277,7 @@
 - inference отделён от tool execution;
 - tools не получают полный host access по умолчанию;
 - agent app не обязан иметь тот же уровень доступа, что host runtime;
-- observability вынесена в отдельные сервисы;
+- observability в MVP ограничена structured run log;
 - mixed design уменьшает complexity по сравнению с VM-heavy решением.
 
 ---
@@ -295,8 +296,9 @@
 Финальный выбор для проекта:
 
 - `host Ollama`
-- `Docker Compose` для app + observability
-- отдельный ограниченный tool execution layer
+- `Docker Compose` для `music-agent` и `Open WebUI`
+- tools выполняются внутри agent app и ограничены доступом к данным проекта
+- отдельный tool sandbox и полноценный observability stack оставлены как следующий шаг
 
 Это лучший компромисс между:
 
